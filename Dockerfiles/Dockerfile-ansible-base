@@ -1,0 +1,86 @@
+# *********************************************************************************
+# Base Builder Image #
+# *********************************************************************************
+ARG ALPINE_VERSION
+
+FROM alpine:${ALPINE_VERSION} as builder
+LABEL stage=builder
+ARG ANSIBLE_VERSION
+
+# packages required for ansible install
+  RUN set -eux \
+  	&& apk add --update --no-cache \
+  		# build tools
+  		coreutils \
+  		g++ \
+  		gcc \
+  		make \
+  		musl-dev \
+  		openssl-dev \
+  		python3-dev \
+  		# misc tools
+  		bc \
+  		libffi-dev \
+  		libxml2-dev \
+  		libxslt-dev \
+  		py3-pip \
+  		python3 \
+# https://www.jeffgeerling.com/blog/2021/ansible-might-be-running-slow-if-libyaml-not-available
+	&& apk add --update --no-cache \
+		py3-yaml \
+	&& python3 -c 'import _yaml'
+
+# Pip required tools
+RUN set -eux \
+        && pip3 install --no-cache-dir --no-compile \
+		    wheel
+
+RUN set -eux \
+		&& pip3 install --no-cache-dir --no-binary pyyaml ansible~=${ANSIBLE_VERSION};
+
+# Python packages (copied to final image)
+RUN set -eux \
+	&& pip3 install --no-cache-dir --no-compile \
+		junit-xml \
+		lxml \
+		paramiko \
+	&& find /usr/lib/ -name '__pycache__' -print0 | xargs -0 -n1 rm -rf \
+	&& find /usr/lib/ -name '*.pyc' -print0 | xargs -0 -n1 rm -rf
+
+# clean up to save space
+RUN set -eux \
+	&& pip3 uninstall --yes \
+		setuptools \
+		wheel \
+	&& find /usr/lib/ -name '__pycache__' -print0 | xargs -0 -n1 rm -rf \
+	&& find /usr/lib/ -name '*.pyc' -print0 | xargs -0 -n1 rm -rf
+
+# *********************************************************************************
+# Final Image
+# *********************************************************************************
+ARG ALPINE_VERSION
+ARG ANSIBLE_VERSION
+
+LABEL "image.open"="${ANSIBLE_VERSION}"
+LABEL "image.createdby"="cmuthukumar"
+
+FROM alpine:${ALPINE_VERSION} as final
+
+RUN set -eux \
+	&& apk add --no-cache \
+# used for ansible-vault
+		libgcc \
+		py3-pip \
+		python3 \
+		yaml \
+	&& find /usr/lib/ -name '__pycache__' -print0 | xargs -0 -n1 rm -rf \
+	&& find /usr/lib/ -name '*.pyc' -print0 | xargs -0 -n1 rm -rf
+
+COPY --from=builder  /usr/lib/python3*/site-packages  /usr/lib/python3.11/site-packages/
+COPY --from=builder /usr/bin/ansible* /usr/bin/
+
+RUN set -eux \
+	&& find /usr/lib/ -name '__pycache__' -print0 | xargs -0 -n1 rm -rf \
+	&& find /usr/lib/ -name '*.pyc' -print0 | xargs -0 -n1 rm -rf
+
+CMD ["/bin/sh"]
